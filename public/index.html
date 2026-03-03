@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Trap & Run</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="transition-overlay"></div>
+    <div id="freeze-overlay"></div>
+    <canvas id="lobby-bg-canvas"></canvas>
+    <div id="scoreboard">
+        <h2 class="score-me-label">SEN: <span id="score-me">0</span></h2>
+        <h2 class="score-opp-label">RAKİP: <span id="score-opp">0</span></h2>
+    </div>
+    <div id="rotate-warning">
+        <div class="rotate-icon">🔄</div>
+        <h2>Lütfen Telefonu Yan Çevirin</h2>
+        <p>Oyun sadece yatay modda oynanabilir.</p>
+    </div>
+    <div id="lives-display">
+        ❤️❤️❤️
+    </div>
+
+    <div id="death-overlay">
+        <div>CANIN BİTTİ!</div>
+        <div id="respawn-timer">5 saniye ceza...</div>
+    </div>
+
+    <div id="lobby-screen" class="screen active">
+        <div id="level-card">
+            <div class="level-label">SEVİYE</div>
+            <div id="lvl-display">1</div>
+            <div class="xp-label">
+                XP: <span id="xp-display">0/100</span>
+            </div>
+        </div>
+        <button id="lobby-fs-btn" class="fs-overlay-btn">⛶ TAM EKRAN</button>
+        <h1>TRAP & RUN</h1>
+        <p>İnşa Et. Sabote Et. Kazan.</p>
+        
+        <input type="text" id="username-input" placeholder="Adını Yaz..." maxlength="10">
+        <button id="open-customize-btn" class="secondary-btn customize-btn">👕 KARAKTERİ DÜZENLE</button>
+        <div class="lobby-actions">
+            <button id="find-match-btn" class="main-btn pulse-anim">⚔️ RASTGELE RAKİP</button>
+            <button id="custom-game-btn" class="secondary-btn">👥 ARKADAŞINLA OYNA</button>
+        </div>
+        <button id="how-to-play-btn" class="howto-btn">❓ NASIL OYNANIR?</button>
+        <div class="lobby-bottom-row">
+            <button id="settings-btn" class="secondary-btn">⚙️ AYARLAR</button>
+            <button id="shop-btn" class="secondary-btn">🛒 MAĞAZA</button>
+        </div>
+        <button id="vib-test-btn">📳 TİTREŞİM TEST</button>
+        <p id="status-msg"></p>
+    </div>
+
+    <div id="tutorial-modal">
+        <div class="tutorial-container">
+            <button id="close-tutorial">✖</button>
+            
+            <div class="tut-sidebar">
+                <h2>T.R.A.P. LABS</h2>
+                <p>Veri tabanından tuzak seç:</p>
+                
+                <div class="tut-menu">
+                    <button class="tut-btn active" onclick="showTutorial('spike')">
+                        <span class="icon">🔪</span> Diken
+                    </button>
+                    <button class="tut-btn" onclick="showTutorial('trampoline')">
+                        <span class="icon">🚀</span> Trambolin
+                    </button>
+                    <button class="tut-btn" onclick="showTutorial('freeze')">
+                        <span class="icon">❄️</span> Dondurucu
+                    </button>
+                    <button class="tut-btn" onclick="showTutorial('reset')">
+                        <span class="icon">💀</span> Başa Atma
+                    </button>
+                </div>
+            </div>
+
+            <div class="tut-preview-area">
+                <div class="monitor-frame">
+                    <div class="screen-glare"></div>
+                    <div class="scanlines"></div>
+                    
+                    <div id="sim-scene" class="scene spike-scene">
+                        <div class="sim-sky"></div>
+                        <div class="sim-floor">
+                            <div class="s-block"></div>
+                            <div class="s-block"></div>
+                            <div class="s-block"></div>
+                            
+                            <div id="sim-trap" class="s-block trap-spike"></div>
+                            
+                            <div class="s-block"></div>
+                            <div class="s-block"></div>
+                        </div>
+                        
+                        <div id="sim-player"></div>
+                        
+                        <div id="sim-info" class="sim-overlay">
+                            <h3>DİKEN TUZAĞI</h3>
+                            <p>Temas anında oyuncuyu yavaşlatır ve canını yakar.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="build-screen" class="screen">
+        <div class="header">
+            <h2>HARİTANI TASARLA</h2>
+            <div class="timer">Kalan Süre: <span id="build-timer">60</span></div>
+        </div>
+        
+        <div class="game-container">
+            <canvas id="build-canvas" width="800" height="600"></canvas>
+            
+            <div id="mobile-ui-buttons">
+                <button id="toggle-toolbar-btn" class="ui-btn">🛠️ Aletler</button>
+                <button id="fullscreen-btn" class="ui-btn">⛶ Tam Ekran</button>
+            </div>
+
+            <div class="toolbar">
+                <div class="tool" data-type="-1">✋ Kaydır</div>
+                
+                <div class="tool active" data-type="1">Zemin</div>
+                <div class="tool" data-type="2">Başlangıç</div>
+                <div class="tool" data-type="3">Bitiş</div>
+                
+                <div class="tool" data-type="4">Başa Atma (<span id="reset-count">2</span>)</div>
+                <div class="tool" data-type="5">Dondurma (<span id="freeze-count">5</span>)</div>
+                <div class="tool" data-type="6">Diken (<span id="spike-count">3</span>)</div>
+                <div class="tool" data-type="7">Testere (<span id="saw-count">3</span>)</div>
+                <div class="tool" data-type="8">Trambolin (<span id="trampoline-count">3</span>)</div>
+                <div class="tool" data-type="10">💣 Mayın (<span id="mine-count">3</span>)</div>
+                <div class="tool" data-type="9">👻 Hayalet Zemin (<span id="ghost-count">5</span>)</div>
+                <div class="tool" data-type="11">🔄 Konveyör (<span id="conveyor-count">4</span>)</div>
+                <div class="tool" data-type="12">💜 Kaybolan Blok (<span id="vanish-count">3</span>)</div>
+                
+                <div class="tool erase" data-type="0">Silgi</div>
+                <div class="build-actions">
+                    <button id="undo-btn" class="build-action-btn" onclick="undoBuild()">↩ Geri Al</button>
+                    <button id="redo-btn" class="build-action-btn" onclick="redoBuild()">↪ İleri Al</button>
+                </div>
+                <button id="submit-map-btn">BİTİRDİM</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="betting-screen">
+        <h1 class="bet-title">BAHİSLER AÇILDI!</h1>
+        <h2 class="bet-subtitle">Bu turu kazanabilir misin?</h2>
+        
+        <div class="bet-options">
+            <button id="bet-high" class="bet-card">
+                <div class="bet-emoji">🔥</div>
+                <div class="bet-label">KESİN KAZANIRIM</div>
+                <div class="bet-desc">(Kazan: +3 / Kaybet: -1)</div>
+            </button>
+
+            <button id="bet-low" class="bet-card">
+                <div class="bet-emoji">🛡️</div>
+                <div class="bet-label">SAKİN OYNA</div>
+                <div class="bet-desc">(Kazan: +1 / Kaybet: 0)</div>
+            </button>
+        </div>
+        
+        <div id="bet-timer">5</div>
+    </div>
+
+    <div id="race-screen" class="screen">
+        <button id="race-fs-btn" class="fs-overlay-btn">⛶</button>
+        <div id="countdown-text">
+            3
+        </div>
+        <div class="header">
+            <h2>YARIŞ BAŞLADI!</h2>
+        </div>
+        
+        <div class="split-screen-container">
+            
+            <div class="player-view">
+                <h3>SEN</h3>
+                <div id="game-view-container">
+                    <canvas id="race-canvas" width="800" height="600"></canvas>
+                    <div id="blur-overlay">SİSTEM KARIŞIKLIĞI!</div>
+                    <div id="blur-timer">
+                        <div class="blur-timer-label">BULANIKLIK</div>
+                        <div class="blur-timer-bar">
+                            <div class="blur-timer-fill"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="player-view">
+                <h3>RAKİP</h3>
+                <canvas id="opponent-canvas" width="800" height="600"></canvas>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="emoji-panel" class="emoji-panel-expanded">
+        <button class="emoji-btn" data-emoji="😂">😂</button>
+        <button class="emoji-btn" data-emoji="😡">😡</button>
+        <button class="emoji-btn" data-emoji="😱">😱</button>
+        <button class="emoji-btn" data-emoji="👋">👋</button>
+        <button class="emoji-btn" data-emoji="🔥">🔥</button>
+        <button class="emoji-btn" data-emoji="💀">💀</button>
+        <button class="emoji-btn" data-emoji="🤡">🤡</button>
+        <button class="emoji-btn" data-emoji="👏">👏</button>
+        <button class="quick-chat-btn emoji-btn" data-emoji="GG!">GG!</button>
+        <button class="quick-chat-btn emoji-btn" data-emoji="Kolay 😎">Kolay</button>
+        <button class="quick-chat-btn emoji-btn" data-emoji="IMKANSIZ!">NAH!</button>
+        <button class="quick-chat-btn emoji-btn" data-emoji="WOW 😮">WOW</button>
+    </div>
+
+    <div id="mobile-controls">
+        <div id="joystick-zone">
+            <div id="joystick-base">
+                <div id="joystick-stick"></div>
+            </div>
+        </div>
+        <div class="action-pad">
+            <button id="btn-jump" class="control-btn">▲</button>
+        </div>
+    </div>
+
+    <div id="toast-warning">
+        ⚠️ Uyarı Mesajı
+    </div>
+
+    <div id="custom-room-modal" class="modal-overlay">
+        <div class="modal-box">
+            <button id="close-modal-btn" class="close-icon">✖</button>
+            <h2>ÖZEL ODA</h2>
+            
+            <div class="modal-section">
+                <p>Bir oda kur ve kodu arkadaşına ver:</p>
+                <button id="create-room-btn" class="action-btn">✨ ODA OLUŞTUR</button>
+                <div id="created-room-code">
+                    <p>ODA KODU:</p>
+                    <div class="code-display-wrap">
+                        <div class="code-display">XF34</div>
+                        <button id="copy-room-code-btn" class="copy-room-btn" type="button" aria-label="Oda kodunu kopyala" title="Kopyala">📋</button>
+                    </div>
+                    <p class="waiting-text">Arkadaşın bekleniyor...</p>
+                </div>
+            </div>
+
+            <div class="divider"><span>VEYA</span></div>
+
+            <div class="modal-section">
+                <p>Arkadaşının verdiği kodu gir:</p>
+                <div class="input-group">
+                    <input type="text" id="room-code-input" placeholder="KODU GİR" maxlength="5">
+                    <button id="join-room-btn" class="action-btn join">KATIL</button>
+                </div>
+                <div id="room-error-msg" class="modal-warning" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="matching-modal" class="modal-overlay">
+        <div class="modal-box matching-box">
+            
+            <div class="loader-spinner"></div>
+            
+            <h2 id="matching-title">RAKİP ARANIYOR</h2>
+            <p id="matching-status-text">Sıraya giriliyor...</p>
+            
+            <button id="cancel-match-btn">
+                İPTAL ET
+            </button>
+        </div>
+    </div>
+
+    <div id="howto-modal" class="modal-overlay">
+        <div class="modal-box info-modal">
+            <button id="close-howto-btn" class="close-icon">✖</button>
+            <h2 class="modal-heading">🎮 OYUN REHBERİ</h2>
+
+            <div class="guide-content">
+                
+                <div class="guide-step">
+                    <div class="step-icon">🏗️</div>
+                    <div class="step-text">
+                        <h3>1. İNŞA ET</h3>
+                        <p>Süre bitene kadar haritaya tuzaklar kur. Rakibini engellemek için stratejik noktaları seç. Kendi kurduğun tuzağa dikkat et!</p>
+                    </div>
+                </div>
+
+                <div class="guide-step">
+                    <div class="step-icon">🏃</div>
+                    <div class="step-text">
+                        <h3>2. KOŞ VE KAZAN</h3>
+                        <p>Parkuru tamamlayıp <strong>Bitiş Bayrağına</strong> ilk ulaşan kazanır. Canlarına dikkat et, biterse elenirsin.</p>
+                    </div>
+                </div>
+
+                <div class="divider"><span>KONTROLLER</span></div>
+
+                <div class="controls-grid">
+                    <div class="control-item">
+                        <div>
+                            <span class="key-cap">W</span> <span class="key-cap">↑</span>
+                        </div>
+                        <span>Zıpla</span>
+                    </div>
+                    <div class="control-item">
+                        <div>
+                            <span class="key-cap">A</span> <span class="key-cap">D</span>
+                            <span class="key-cap">←</span> <span class="key-cap">→</span>
+                        </div>
+                        <span>Hareket Et</span>
+                    </div>
+                </div>
+
+                <div class="divider"><span>TUZAKLAR VE ETKİLERİ</span></div>
+
+                <div class="traps-grid">
+                    <div class="trap-item">
+                        <span class="trap-icon">🧊</span>
+                        <div><strong>Buz:</strong> Üzerine basarsan <strong>3 saniye donarsın</strong> ve hareket edemezsin.</div>
+                    </div>
+                    <div class="trap-item">
+                        <span class="trap-icon">🔻</span>
+                        <div><strong>Diken:</strong> Öldürmez ama hızını <strong>%50 yavaşlatır.</strong></div>
+                    </div>
+                    <div class="trap-item">
+                        <span class="trap-icon">⚙️</span>
+                        <div><strong>Testere:</strong> Çok tehlikeli! Değersen canın gider ve başa dönersin.</div>
+                    </div>
+                    <div class="trap-item">
+                        <span class="trap-icon">👻</span>
+                        <div><strong>Hayalet:</strong> Zemin gibi görünür ama sahtedir, içinden düşersin!</div>
+                    </div>
+                    <div class="trap-item trap-item-wide"> <span class="trap-icon">🔙</span>
+                        <div><strong>Başa At (Reset):</strong> Bu tuzağa basarsan anında <strong>başlangıç noktasına</strong> ışınlanırsın.</div>
+                    </div>
+                </div>
+
+            </div>
+            
+            <button id="ok-howto-btn" class="action-btn ok-howto">ANLAŞILDI, BAŞLA!</button>
+        </div>
+    </div>
+
+    <div id="customize-screen" class="screen">
+        <h1 class="customize-title">GARDIROP</h1>
+        
+        <div class="preview-container">
+            <canvas id="char-preview-canvas" width="300" height="300"></canvas>
+        </div>
+
+        <div class="custom-controls">
+            <h3 class="section-heading">RENK SEÇİMİ</h3>
+            <div id="new-color-selection">
+                <div class="color-btn selected" data-color="#ff4757" style="background: #ff4757;"></div>
+                <div class="color-btn" data-color="#2ecc71" style="background: #2ecc71;"></div>
+                <div class="color-btn" data-color="#3498db" style="background: #3498db;"></div>
+                <div class="color-btn" data-color="#f1c40f" style="background: #f1c40f;"></div>
+                <div class="color-btn" data-color="#9b59b6" style="background: #9b59b6;"></div>
+                <div class="color-btn" data-color="#e67e22" style="background: #e67e22;"></div>
+                <div class="color-btn" data-color="#ecf0f1" style="background: #ecf0f1;"></div>
+                <div class="color-btn" data-color="#34495e" style="background: #34495e;"></div>
+            </div>
+
+            <h3 class="section-heading section-divider">AKSESUAR SEÇ</h3>
+            <div id="hat-selection">
+                <button class="hat-btn selected" data-hat="0">🚫</button>
+                <button class="hat-btn" data-hat="1">👑</button>
+                <button class="hat-btn" data-hat="2">🎧</button>
+                <button class="hat-btn" data-hat="3">🧢</button>
+                <button class="hat-btn" data-hat="4">⚔️</button>
+            </div>
+        </div>
+
+        <button id="save-char-btn" class="main-btn save-char">KAYDET VE ÇIK</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="audio.js"></script>
+
+    <!-- AYARLAR MENÜSÜ -->
+    <div id="settings-modal">
+        <div class="settings-card">
+            <h2>⚙️ AYARLAR</h2>
+            <div class="settings-row">
+                <label>🎵 Müzik</label>
+                <input type="range" id="music-vol" min="0" max="100" value="15">
+                <span class="vol-value" id="music-vol-val">15</span>
+            </div>
+            <div class="settings-row">
+                <label>🔊 Efektler</label>
+                <input type="range" id="sfx-vol" min="0" max="100" value="50">
+                <span class="vol-value" id="sfx-vol-val">50</span>
+            </div>
+            <button id="close-settings-btn">TAMAM</button>
+        </div>
+    </div>
+
+    <!-- YARIŞ ZAMANLAYICISI -->
+    <div id="race-timer">⏱ 90</div>
+
+    <!-- BAŞARIM TOAST -->
+    <div id="achievement-toast"></div>
+
+    <!-- MAĞAZA -->
+    <div id="shop-modal">
+        <div class="shop-card">
+            <h2>🛒 MAĞAZA</h2>
+            <div class="shop-coins">💰 <span id="shop-coin-display">0</span> Coin</div>
+            <div class="shop-section" id="shop-trails-section">
+                <h3>✨ İZ EFEKTLERİ</h3>
+                <div class="shop-grid" id="shop-trails-grid"></div>
+            </div>
+            <div class="shop-section" id="shop-deathfx-section">
+                <h3>💀 ÖLÜM EFEKTLERİ</h3>
+                <div class="shop-grid" id="shop-deathfx-grid"></div>
+            </div>
+            <div class="shop-section" id="shop-colors-section">
+                <h3>🎨 ÖZEL RENKLER</h3>
+                <div class="shop-grid" id="shop-colors-grid"></div>
+            </div>
+            <button id="close-shop-btn">KAPAT</button>
+        </div>
+    </div>
+    <div id="revive-modal" class="custom-modal">
+        <div class="modal-box">
+            <h2 class="revive-heading">YARIŞ DIŞI KALDIN!</h2>
+            <p>Beklemeden anında yarışa dönmek ister misin?</p>
+            <button id="btn-watch-ad" class="neon-btn gold-btn">📺 REKLAM İZLE & CANLAN</button>
+            <button id="btn-skip-ad" class="neon-btn red-btn skip-ad-btn">Hayır, bekleyeceğim</button>
+        </div>
+    </div>
+
+    <div id="mock-ad-screen" class="custom-modal">
+        <div class="mock-ad-box">
+            <div class="ad-placeholder">
+                <span class="ad-icon">🎮</span>
+                <h3>SPONSORLU İÇERİK (YER TUTUCU)</h3>
+                <p>Burada gerçek bir reklam videosu oynayacak.</p>
+            </div>
+            <div id="ad-timer" class="ad-countdown">3</div>
+        </div>
+    </div>
+
+    <script src="graphics.js"></script>
+    <script src="input.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
