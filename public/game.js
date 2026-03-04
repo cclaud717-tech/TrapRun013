@@ -387,6 +387,10 @@ socket.on('game_start', (data) => {
     playerHats = data.hats || {};
     currentTheme = data.theme || 'NORMAL';
 
+    // localStorage'a kaydet (sayfa kapanırsa rejoin için)
+    try { localStorage.setItem('rejoin_room', roomID); } catch(e) {}
+
+    hideRejoinButton();
     updateScoreBoard(data.scores);
     document.getElementById('scoreboard').style.display = 'flex';
 
@@ -398,29 +402,44 @@ socket.on('opponent_disconnecting', (seconds) => {
 });
 
 // --- Kendi bağlantım koptu - otomatik yeniden bağlan ---
-let lastDisconnectedRoom = null;
-
 socket.on('disconnect', () => {
-    // Eğer aktif bir odadaysak, rejoin için sakla
-    if (roomID) {
-        lastDisconnectedRoom = roomID;
-    }
     showWarning('❌ Bağlantı kesildi! Yeniden bağlanılıyor...');
 });
 socket.on('connect', () => {
-    // Otomatik rejoin dene (bağlantı koptu → yeni socket ID aldı)
-    if (lastDisconnectedRoom) {
-        const savedRoom = lastDisconnectedRoom;
-        lastDisconnectedRoom = null;
+    // Sayfa yenilenmeden socket koptu-bağlandıysa, otomatik rejoin
+    if (roomID) {
         const myName = document.getElementById('username-input').value.trim() || 'Oyuncu';
         socket.emit('rejoin_room', {
-            roomID: savedRoom,
+            roomID: roomID,
             name: myName,
             color: myColor,
             hat: myHat
         });
         showWarning('🔄 Bağlantı yeniden sağlandı, odaya dönülüyor...');
+        return;
     }
+    
+    // Sayfa yenilendi/kapanıp açıldı — localStorage'dan kontrol et
+    try {
+        const savedRoom = localStorage.getItem('rejoin_room');
+        if (savedRoom) {
+            // Sunucuya sor: oda hala mevcut mu?
+            socket.emit('check_rejoin', savedRoom);
+        }
+    } catch(e) {}
+});
+
+// Sunucu cevapları
+socket.on('rejoin_available', (secondsLeft) => {
+    const savedRoom = localStorage.getItem('rejoin_room');
+    if (savedRoom && secondsLeft > 0) {
+        showRejoinButton(savedRoom, secondsLeft);
+    }
+});
+
+socket.on('rejoin_expired', () => {
+    try { localStorage.removeItem('rejoin_room'); } catch(e) {}
+    hideRejoinButton();
 });
 
 socket.on('opponent_left', () => {
@@ -428,11 +447,14 @@ socket.on('opponent_left', () => {
 
     if (restartTimer) clearTimeout(restartTimer);
 
+    // Oda kapandı, localStorage temizle (rejoin gösterme)
+    try { localStorage.removeItem('rejoin_room'); } catch(e) {}
+
     showWarning("⚠️ RAKİP KAÇTI! LOBİYE DÖNÜLÜYOR...");
     playSound('teleport');
 
     setTimeout(() => {
-        returnToLobby();
+        returnToLobby(true); // skipRejoin = true
     }, 3000);
 });
 
@@ -698,7 +720,8 @@ function showMatchOverScreen(iWon, winnerName, scores, names) {
 
     document.getElementById('match-over-btn').addEventListener('click', () => {
         overlay.style.display = 'none';
-        returnToLobby();
+        try { localStorage.removeItem('rejoin_room'); } catch(e) {}
+        returnToLobby(true);
     });
 }
 
@@ -1864,14 +1887,15 @@ function hideRejoinButton() {
     if (rejoinTimerInterval) { clearInterval(rejoinTimerInterval); rejoinTimerInterval = null; }
     const btn = document.getElementById('rejoin-btn');
     if (btn) btn.style.display = 'none';
+    try { localStorage.removeItem('rejoin_room'); } catch(e) {}
 }
 
-function showRejoinButton(lastRoomID) {
+function showRejoinButton(lastRoomID, secondsOverride) {
     const btn = document.getElementById('rejoin-btn');
     if (!btn) return;
     
     btn.style.display = 'flex';
-    let timeLeft = 10;
+    let timeLeft = secondsOverride || 10;
     btn.innerHTML = `🔄 GERİ DÖN <span id="rejoin-countdown">(${timeLeft}s)</span>`;
     
     if (rejoinTimerInterval) clearInterval(rejoinTimerInterval);
@@ -1885,6 +1909,7 @@ function showRejoinButton(lastRoomID) {
             clearInterval(rejoinTimerInterval);
             rejoinTimerInterval = null;
             btn.style.display = 'none';
+            try { localStorage.removeItem('rejoin_room'); } catch(e) {}
         }
     }, 1000);
     
@@ -1913,6 +1938,10 @@ socket.on('rejoin_success', (data) => {
     currentTheme = data.theme || 'NORMAL';
     myRole = data.role;
     
+    // localStorage güncelle
+    try { localStorage.setItem('rejoin_room', roomID); } catch(e) {}
+    hideRejoinButton();
+    
     updateScoreBoard(data.scores);
     document.getElementById('scoreboard').style.display = 'flex';
     
@@ -1922,6 +1951,9 @@ socket.on('rejoin_success', (data) => {
 });
 
 socket.on('rejoin_failed', (msg) => {
+    // localStorage temizle
+    try { localStorage.removeItem('rejoin_room'); } catch(e) {}
+    hideRejoinButton();
     showWarning('❌ ' + msg);
     playSound('trap');
 });
@@ -2217,10 +2249,7 @@ document.addEventListener('fullscreenchange', () => {
     }
 });
 
-function returnToLobby() {
-    // Rejoin bilgisini sakla (lobiye dönmeden önce)
-    const lastRoom = roomID;
-    
+function returnToLobby(skipRejoin) {
     isOpponentLeft = false;
     isGameEnding = false;
     if (typeof stopMusic === 'function') stopMusic();
@@ -2246,9 +2275,9 @@ function returnToLobby() {
     const modal = document.getElementById('custom-room-modal');
     if(modal) modal.style.display = 'none';
     
-    // --- REJOIN BUTONU GÖSTER ---
-    if (lastRoom) {
-        showRejoinButton(lastRoom);
+    // Rejoin butonu gösterme — localStorage tabanlı sayfa açılışında yapılıyor
+    if (skipRejoin) {
+        try { localStorage.removeItem('rejoin_room'); } catch(e) {}
     }
 }
 

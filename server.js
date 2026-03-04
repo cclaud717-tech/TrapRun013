@@ -516,7 +516,8 @@ io.on('connection', (socket) => {
                     name: room.names[socket.id],
                     color: room.colors[socket.id],
                     hat: room.hats[socket.id],
-                    oldId: socket.id
+                    oldId: socket.id,
+                    disconnectTime: Date.now()
                 };
                 
                 // 10 saniye grace period ver (kısa kopmalarda oyun bitmesin)
@@ -539,6 +540,22 @@ io.on('connection', (socket) => {
                 
                 break; 
             }
+        }
+    });
+
+    // --- ODA DURUMU KONTROL ---
+    socket.on('check_rejoin', (targetRoom) => {
+        const room = rooms[targetRoom];
+        if (!room || !room.disconnectedPlayer) {
+            socket.emit('rejoin_expired');
+            return;
+        }
+        const elapsed = (Date.now() - room.disconnectedPlayer.disconnectTime) / 1000;
+        const remaining = Math.max(0, Math.floor(10 - elapsed));
+        if (remaining <= 0) {
+            socket.emit('rejoin_expired');
+        } else {
+            socket.emit('rejoin_available', remaining);
         }
     });
 
