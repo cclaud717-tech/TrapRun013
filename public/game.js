@@ -65,6 +65,21 @@ let roundStats = {
 // isMobileDevice → graphics.js'de tanımlı (global)
 let gameLoopFrameCount = 0;
 
+// --- PING ÖLÇER ---
+let currentPing = 0;
+setInterval(() => {
+    const start = Date.now();
+    socket.emit('client_ping', start);
+}, 3000);
+socket.on('client_pong', (timestamp) => {
+    currentPing = Date.now() - timestamp;
+    const pingEl = document.getElementById('ping-display');
+    if (pingEl) {
+        pingEl.innerText = currentPing + 'ms';
+        pingEl.className = 'ping-display ' + (currentPing < 80 ? 'ping-good' : currentPing < 150 ? 'ping-ok' : 'ping-bad');
+    }
+});
+
 const TILE_SIZE = 40;
 const COLS = 60; // <--- DEĞİŞTİ (Eskisi 20 idi, şimdi upuzun bir yol var)
 const ROWS = 15; 
@@ -206,6 +221,9 @@ document.getElementById('find-match-btn').addEventListener('click', () => {
     const nameInput = document.getElementById('username-input');
     const myName = nameInput.value.trim();
     if (!myName) { showWarning("Lütfen ismini yaz!"); return; }
+
+    // Rejoin butonu varsa gizle
+    hideRejoinButton();
 
     const matchModal = document.getElementById('matching-modal');
     matchModal.style.display = 'flex';
@@ -373,6 +391,36 @@ socket.on('game_start', (data) => {
     document.getElementById('scoreboard').style.display = 'flex';
 
     startNewRound();
+});
+
+socket.on('opponent_disconnecting', (seconds) => {
+    showWarning(`⚠️ Rakibin bağlantısı koptu! ${seconds}sn bekleniyor...`);
+});
+
+// --- Kendi bağlantım koptu - otomatik yeniden bağlan ---
+let lastDisconnectedRoom = null;
+
+socket.on('disconnect', () => {
+    // Eğer aktif bir odadaysak, rejoin için sakla
+    if (roomID) {
+        lastDisconnectedRoom = roomID;
+    }
+    showWarning('❌ Bağlantı kesildi! Yeniden bağlanılıyor...');
+});
+socket.on('connect', () => {
+    // Otomatik rejoin dene (bağlantı koptu → yeni socket ID aldı)
+    if (lastDisconnectedRoom) {
+        const savedRoom = lastDisconnectedRoom;
+        lastDisconnectedRoom = null;
+        const myName = document.getElementById('username-input').value.trim() || 'Oyuncu';
+        socket.emit('rejoin_room', {
+            roomID: savedRoom,
+            name: myName,
+            color: myColor,
+            hat: myHat
+        });
+        showWarning('🔄 Bağlantı yeniden sağlandı, odaya dönülüyor...');
+    }
 });
 
 socket.on('opponent_left', () => {
@@ -1506,6 +1554,12 @@ async function switchScreen(name) {
         }
     }
     
+    // --- PING GÖSTERGESİ ---
+    const pingEl = document.getElementById('ping-display');
+    if (pingEl) {
+        pingEl.style.display = (name === 'race') ? 'block' : 'none';
+    }
+
     // --- EMOJİ PANELİ ---
     const emojiPanel = document.getElementById('emoji-panel');
     if (emojiPanel) {
@@ -1795,7 +1849,86 @@ document.querySelectorAll('.color-btn').forEach(btn => {
 });
 
 document.getElementById('cancel-match-btn').addEventListener('click', () => {
-    window.location.reload();
+    socket.emit('cancel_matchmaking');
+    document.getElementById('matching-modal').style.display = 'none';
+    document.getElementById('find-match-btn').disabled = false;
+    document.getElementById('custom-game-btn').disabled = false;
+    document.getElementById('status-msg').innerText = '';
+    showWarning('❌ Eşleşme iptal edildi.');
+});
+
+// --- REJOIN (GERİ DÖN) SİSTEMİ ---
+let rejoinTimerInterval = null;
+
+function hideRejoinButton() {
+    if (rejoinTimerInterval) { clearInterval(rejoinTimerInterval); rejoinTimerInterval = null; }
+    const btn = document.getElementById('rejoin-btn');
+    if (btn) btn.style.display = 'none';
+}
+
+function showRejoinButton(lastRoomID) {
+    const btn = document.getElementById('rejoin-btn');
+    if (!btn) return;
+    
+    btn.style.display = 'flex';
+    let timeLeft = 10;
+    btn.innerHTML = `🔄 GERİ DÖN <span id="rejoin-countdown">(${timeLeft}s)</span>`;
+    
+    if (rejoinTimerInterval) clearInterval(rejoinTimerInterval);
+    
+    rejoinTimerInterval = setInterval(() => {
+        timeLeft--;
+        const countdownEl = document.getElementById('rejoin-countdown');
+        if (countdownEl) countdownEl.innerText = `(${timeLeft}s)`;
+        
+        if (timeLeft <= 0) {
+            clearInterval(rejoinTimerInterval);
+            rejoinTimerInterval = null;
+            btn.style.display = 'none';
+        }
+    }, 1000);
+    
+    // Click handler (tek seferlik)
+    btn.onclick = () => {
+        if (rejoinTimerInterval) clearInterval(rejoinTimerInterval);
+        rejoinTimerInterval = null;
+        btn.style.display = 'none';
+        
+        const myName = document.getElementById('username-input').value.trim() || 'Oyuncu';
+        socket.emit('rejoin_room', {
+            roomID: lastRoomID,
+            name: myName,
+            color: myColor,
+            hat: myHat
+        });
+        showWarning('🔄 Odaya geri bağlanılıyor...');
+    };
+}
+
+socket.on('rejoin_success', (data) => {
+    roomID = data.roomID;
+    playerNames = data.names;
+    playerColors = data.colors;
+    playerHats = data.hats || {};
+    currentTheme = data.theme || 'NORMAL';
+    myRole = data.role;
+    
+    updateScoreBoard(data.scores);
+    document.getElementById('scoreboard').style.display = 'flex';
+    
+    showWarning('✅ Odaya geri döndün! Yeni raund başlıyor...');
+    playSound('powerup');
+    startNewRound();
+});
+
+socket.on('rejoin_failed', (msg) => {
+    showWarning('❌ ' + msg);
+    playSound('trap');
+});
+
+socket.on('opponent_reconnected', (name) => {
+    showWarning(`✅ ${name} geri döndü!`);
+    playSound('powerup');
 });
 
 
@@ -2085,6 +2218,9 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 function returnToLobby() {
+    // Rejoin bilgisini sakla (lobiye dönmeden önce)
+    const lastRoom = roomID;
+    
     isOpponentLeft = false;
     isGameEnding = false;
     if (typeof stopMusic === 'function') stopMusic();
@@ -2109,6 +2245,11 @@ function returnToLobby() {
 
     const modal = document.getElementById('custom-room-modal');
     if(modal) modal.style.display = 'none';
+    
+    // --- REJOIN BUTONU GÖSTER ---
+    if (lastRoom) {
+        showRejoinButton(lastRoom);
+    }
 }
 
 function checkPathValidity(mapData) {
@@ -2671,8 +2812,11 @@ function startRaceTimer() {
         if (raceTimeLeft <= 0) {
             clearInterval(raceTimerInterval);
             raceTimerInterval = null;
-            // Süre doldu - kimse bitirmedi
-            showWarning("⏱ SÜRE DOLDU!");
+            // Süre doldu - sunucuya bildir, en ilerideki kazanır
+            showWarning("⏱ SÜRE DOLDU! En ilerideki kazanır...");
+            playSound('trap');
+            vibrateMobile([300, 100, 300]);
+            socket.emit('race_timeout', roomID);
         }
     }, 1000);
 }

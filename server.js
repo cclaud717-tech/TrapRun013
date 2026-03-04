@@ -69,6 +69,10 @@ function getAllValidSpawnPoints(map) {
 io.on('connection', (socket) => {
     console.log(`[BAĞLANTI] Yeni oyuncu geldi: ${socket.id}`);
 
+    socket.on('client_ping', (timestamp) => {
+        socket.emit('client_pong', timestamp);
+    });
+
     socket.on('join_game', (data) => {
         const playerName = (data && data.name) || data || `Oyuncu ${socket.id.substr(0,4)}`;
         const playerColor = (data && data.color) || '#ff4757';
@@ -140,6 +144,13 @@ io.on('connection', (socket) => {
         } else {
             waitingPlayer = socket;
             socket.emit('waiting', 'Rakip bekleniyor...');
+        }
+    });
+
+    socket.on('cancel_matchmaking', () => {
+        if (waitingPlayer && waitingPlayer.id === socket.id) {
+            waitingPlayer = null;
+            console.log(`[IPTAL] ${socket.id} eşleşmeyi iptal etti.`);
         }
     });
 
@@ -286,6 +297,12 @@ io.on('connection', (socket) => {
         if (data.x !== undefined && data.y !== undefined) {
             if (data.x < -100 || data.x > 2500 || data.y < -200 || data.y > 700) return;
         }
+        // Pozisyonu sunucuda kaydet (süre dolunca en ileridekini bulmak için)
+        const room = rooms[data.roomID];
+        if (room) {
+            if (!room.positions) room.positions = {};
+            room.positions[socket.id] = { x: data.x || 0, y: data.y || 0 };
+        }
         socket.to(data.roomID).emit('opponent_move', data);
     });
     socket.on('powerup_collected', (roomID) => {
@@ -381,6 +398,52 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- SÜRE DOLDU: En ilerideki kazanır ---
+    socket.on('race_timeout', (roomID) => {
+        const room = rooms[roomID];
+        if (!room) return;
+        if (room.roundEnded) return;
+        room.roundEnded = true;
+
+        // Pozisyonlara bak, en ilerideki (en büyük x) kazanır
+        const pos = room.positions || {};
+        const p1x = pos[room.p1] ? pos[room.p1].x : 0;
+        const p2x = pos[room.p2] ? pos[room.p2].x : 0;
+
+        let winnerId;
+        if (Math.abs(p1x - p2x) < 10) {
+            // Neredeyse aynı yerdeler → berabere, rastgele seç
+            winnerId = Math.random() > 0.5 ? room.p1 : room.p2;
+        } else {
+            winnerId = (p1x > p2x) ? room.p1 : room.p2;
+        }
+
+        const loserId = (room.p1 === winnerId) ? room.p2 : room.p1;
+
+        let pointsToAdd = 1;
+        if (room.bets && room.bets[winnerId] === 'high') pointsToAdd = 3;
+        if (room.bets && room.bets[loserId] === 'high') {
+            room.scores[loserId] = Math.max(0, room.scores[loserId] - 1);
+        }
+        room.scores[winnerId] += pointsToAdd;
+
+        const MATCH_WIN_SCORE = 5;
+        if (room.scores[winnerId] >= MATCH_WIN_SCORE) {
+            io.to(roomID).emit('match_over', {
+                winner: winnerId,
+                scores: room.scores,
+                names: room.names
+            });
+            delete rooms[roomID];
+            return;
+        }
+
+        io.to(roomID).emit('round_over', { winner: winnerId, scores: room.scores, timeout: true });
+        room.maps = {};
+        room.bets = {};
+        room.positions = {};
+    });
+
     // --- HARİTA SENKRONİZASYONU ---
     socket.on('tile_changed', (data) => {
         // data içeriği: { roomID, r, c, type }
@@ -444,19 +507,107 @@ io.on('connection', (socket) => {
         for (let roomId in rooms) {
             const room = rooms[roomId];
             if (room.p1 === socket.id || room.p2 === socket.id) {
-            const opponentId = (room.p1 === socket.id) ? room.p2 : room.p1;
-            
-            io.to(opponentId).emit('opponent_left'); 
-            io.to(opponentId).emit('round_over', { 
-                winner: opponentId, 
-                scores: room.scores
-            });
+                const disconnectedSlot = (room.p1 === socket.id) ? 'p1' : 'p2';
+                const opponentId = (room.p1 === socket.id) ? room.p2 : room.p1;
                 
-                delete rooms[roomId];
-                console.log(`[ODA] ${roomId} kapatıldı (Oyuncu koptu).`);
+                // Kopan oyuncunun bilgilerini sakla (rejoin için)
+                room.disconnectedPlayer = {
+                    slot: disconnectedSlot,
+                    name: room.names[socket.id],
+                    color: room.colors[socket.id],
+                    hat: room.hats[socket.id],
+                    oldId: socket.id
+                };
+                
+                // 10 saniye grace period ver (kısa kopmalarda oyun bitmesin)
+                io.to(opponentId).emit('opponent_disconnecting', 10);
+                console.log(`[GRACE] ${socket.id} için 10sn bekleniyor...`);
+                
+                room.disconnectTimer = setTimeout(() => {
+                    // 10 saniye geçti, hala bağlanmadı → oyunu bitir
+                    if (rooms[roomId]) {
+                        room.disconnectedPlayer = null;
+                        io.to(opponentId).emit('opponent_left');
+                        io.to(opponentId).emit('round_over', { 
+                            winner: opponentId, 
+                            scores: room.scores
+                        });
+                        delete rooms[roomId];
+                        console.log(`[ODA] ${roomId} kapatıldı (Oyuncu 10sn içinde dönmedi).`);
+                    }
+                }, 10000);
+                
                 break; 
             }
         }
+    });
+
+    // --- ODAYA GERİ DÖNME ---
+    socket.on('rejoin_room', (data) => {
+        const { roomID: targetRoom, name, color, hat } = data;
+        const room = rooms[targetRoom];
+        
+        if (!room || !room.disconnectedPlayer) {
+            socket.emit('rejoin_failed', 'Oda artık mevcut değil.');
+            return;
+        }
+        
+        const dp = room.disconnectedPlayer;
+        const oldId = dp.oldId;
+        const slot = dp.slot;
+        
+        // Grace timer'ı iptal et
+        if (room.disconnectTimer) {
+            clearTimeout(room.disconnectTimer);
+            room.disconnectTimer = null;
+        }
+        
+        // Yeni socket ID ile eski slotu güncelle
+        room[slot] = socket.id;
+        
+        // İsim/renk/şapka bilgilerini taşı
+        room.names[socket.id] = dp.name;
+        room.colors[socket.id] = dp.color;
+        room.hats[socket.id] = dp.hat;
+        room.scores[socket.id] = room.scores[oldId] || 0;
+        room.lives[socket.id] = room.lives[oldId] || 3;
+        
+        // Eski ID'nin bilgilerini temizle
+        delete room.names[oldId];
+        delete room.colors[oldId];
+        delete room.hats[oldId];
+        delete room.scores[oldId];
+        delete room.lives[oldId];
+        if (room.positions && room.positions[oldId]) {
+            room.positions[socket.id] = room.positions[oldId];
+            delete room.positions[oldId];
+        }
+        
+        room.disconnectedPlayer = null;
+        
+        socket.playerName = dp.name;
+        socket.playerColor = dp.color;
+        socket.playerHat = dp.hat;
+        
+        socket.join(targetRoom);
+        
+        const opponentId = (room.p1 === socket.id) ? room.p2 : room.p1;
+        
+        // Oyuncuya oda bilgilerini gönder
+        socket.emit('rejoin_success', {
+            roomID: targetRoom,
+            scores: room.scores,
+            names: room.names,
+            colors: room.colors,
+            hats: room.hats,
+            theme: room.theme,
+            role: slot === 'p1' ? 'player1' : 'player2'
+        });
+        
+        // Rakibe haber ver
+        io.to(opponentId).emit('opponent_reconnected', dp.name);
+        
+        console.log(`[REJOIN] ${dp.name} odaya geri döndü: ${targetRoom}`);
     });
 });
 
